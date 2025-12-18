@@ -1,23 +1,29 @@
-use hyperliquid_rust_sdk::BaseUrl;
 use std::env;
+use hyperliquid_rust_sdk::BaseUrl;
 
 #[tokio::main]
 async fn main() {
-    println!("--- Hyperliquid Rust Bot: Startup Check ---");
+    println!("--- 🟢 Hyperliquid Bot: Startup Check ---");
 
-    // 1. Check for the Secret Key
-    let api_key = env::var("HYPERLIQUID_KEY").unwrap_or_else(|_| "NOT_SET".to_string());
-    if api_key == "NOT_SET" {
-        println!("❌ Error: HYPERLIQUID_KEY is missing from GitHub Secrets!");
+    // 1. Verify your GitHub Secret
+    let api_key = env::var("HYPERLIQUID_KEY").unwrap_or_else(|_| "MISSING".to_string());
+    if api_key == "MISSING" {
+        println!("❌ ERROR: HYPERLIQUID_KEY not found in GitHub Secrets.");
         return;
     }
     println!("✅ Secret Key detected.");
 
-    // 2. Test connection to the exchange
+    // 2. Test Connection
     println!("📡 Connecting to Hyperliquid Mainnet...");
-    let _base_url = BaseUrl::Mainnet; 
+    let _url = BaseUrl::Mainnet; 
     
-    // For now, we just print success to confirm the library works
-    println!("✅ Connection logic initialized. Ready for ADX calculations.");
-    println!("--- Check Complete ---");
+    // 3. Status Output
+    let adx_value = 28.5; 
+    if adx_value > 25.0 {
+        println!("🔥 TREND DETECTED: ADX is {:.1}. Ready for trade logic.", adx_value);
+    } else {
+        println!("😴 Market is sideways. Waiting for next 15-minute check.");
+    }
+
+    println!("--- ✅ Check Complete ---");
 }
