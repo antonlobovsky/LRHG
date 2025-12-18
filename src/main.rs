@@ -1,5 +1,5 @@
 use hyperliquid_rust_sdk::{BaseUrl, InfoClient};
-use ta::indicators::AverageDirectionalIndex;
+use ta::indicators::ADX;
 use ta::Next;
 
 #[tokio::main]
@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Received {} candles.", candles.len());
 
     // 3. Initialize ADX with a 14-period window
-    let mut adx = AverageDirectionalIndex::new(14).unwrap();
+    let mut adx = ADX::new(14).unwrap();
     let mut last_adx = 0.0;
 
     // 4. Feed High, Low, Close data into the ADX
