@@ -1,1 +1,13 @@
+[package]
+name = "hyperliquid_rust_bot"
+version = "0.1.0"
+edition = "2021"
 
+[dependencies]
+# The official-style SDK for Hyperliquid
+hyperliquid-rust-sdk = "0.5" 
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+# The library for ADX and other indicators
+ta = "0.5" 
+dotenv = "0.15"
