@@ -1,4 +1,20 @@
-- name: Install TA-Lib System Dependency
+name: Hyperliquid Rust Bot
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-rust-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install TA-Lib System Dependency
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential wget
@@ -8,3 +24,8 @@
           ./configure --prefix=/usr
           make
           sudo make install
+
+      - name: Build and Run
+        env:
+          HYPERLIQUID_KEY: ${{ secrets.HYPERLIQUID_KEY }}
+        run: cargo run --release
