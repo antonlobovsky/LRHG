@@ -1,0 +1,26 @@
+name: Hyperliquid Rust Bot
+on:
+  schedule:
+    # Still running every 15 minutes as you requested
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-rust-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install TA-Lib System Dependency
+        # Rust needs this C library to "bind" to technical indicators
+        run: sudo apt-get update && sudo apt-get install -y ta-lib-dev
+
+      - name: Build and Run
+        env:
+          # Only the Hyperliquid key is needed now
+          HYPERLIQUID_KEY: ${{ secrets.HYPERLIQUID_KEY }}
+        run: cargo run --release
