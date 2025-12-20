@@ -7,9 +7,14 @@ struct PriceData {
     prices: HashMap<String, HashMap<String, f64>>,
 }
 
-#[derive(Deserialize)]
-struct OhlcData {
-    prices: Vec<Vec<f64>>,  // [[timestamp, open, high, low, close], ...]
+// Correct OHLC structure: timestamp is i64/u64, others f64
+#[derive(Deserialize, Debug)]
+struct OhlcCandle {
+    time: u64,   // We ignore this, but need to parse it
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
 }
 
 fn calculate_adx(highs: &[f64], lows: &[f64], closes: &[f64], period: usize) -> Option<f64> {
@@ -54,7 +59,6 @@ fn calculate_adx(highs: &[f64], lows: &[f64], closes: &[f64], period: usize) -> 
     let mut plus_di = vec![0.0; len];
     let mut minus_di = vec![0.0; len];
 
-    // Initial smoothed values
     atr[period - 2] = tr[..period].iter().sum::<f64>() / period as f64;
     plus_di[period - 2] = 100.0
         * (plus_dm[..period].iter().sum::<f64>() / period as f64)
@@ -63,7 +67,6 @@ fn calculate_adx(highs: &[f64], lows: &[f64], closes: &[f64], period: usize) -> 
         * (minus_dm[..period].iter().sum::<f64>() / period as f64)
         / (atr[period - 2] + 1e-10);
 
-    // Wilder smoothing for remaining values
     for i in period..len {
         atr[i - 1] = (atr[i - 2] * (period as f64 - 1.0) + tr[i]) / period as f64;
         plus_di[i - 1] = 100.0
@@ -95,7 +98,7 @@ fn calculate_adx(highs: &[f64], lows: &[f64], closes: &[f64], period: usize) -> 
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
 
-    // Fetch current prices
+    // Current prices
     let price_url = "https://api.coingecko.com/api/v3/simple/price";
     let params = [("ids", "bitcoin,cardano"), ("vs_currencies", "usd")];
     let price_resp = client
@@ -117,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|m| m.get("usd"))
         .unwrap_or(&0.0);
 
-    // Fetch historical OHLC data and calculate ADX
+    // Historical OHLC for ADX (daily over last ~90 days)
     let mut btc_highs = Vec::new();
     let mut btc_lows = Vec::new();
     let mut btc_closes = Vec::new();
@@ -133,38 +136,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("cardano", &mut ada_highs, &mut ada_lows, &mut ada_closes),
     ] {
         let ohlc_url = base_url.replace("{}", id);
-        let ohlc_resp = client
+        let ohlc_resp: Vec<OhlcCandle> = client
             .get(&ohlc_url)
             .send()
             .await?
-            .json::<OhlcData>()
+            .json()
             .await?;
 
-        for candle in ohlc_resp.prices {
-            // candle: [timestamp, open, high, low, close]
-            highs.push(candle[2]);
-            lows.push(candle[3]);
-            closes.push(candle[4]);
+        for candle in ohlc_resp {
+            highs.push(candle.high);
+            lows.push(candle.low);
+            closes.push(candle.close);
         }
     }
 
     let btc_adx = calculate_adx(&btc_highs, &btc_lows, &btc_closes, 14).unwrap_or(0.0);
     let ada_adx = calculate_adx(&ada_highs, &ada_lows, &ada_closes, 14).unwrap_or(0.0);
 
-    // Pretty table output
+    // Pretty table
     println!("┌────────────────────┬────────────────────┬──────────────┐");
     println!("│ Cryptocurrency     │ Price (USD)        │ ADX (14)     │");
     println!("├────────────────────┼────────────────────┼──────────────┤");
-    println!(
-        "│ ₿ Bitcoin (BTC)    │ ${:>16.2} │ {:>10.2} │",
-        format!("{:.2}", btc_price),
-        btc_adx
-    );
-    println!(
-        "│ ₳ Cardano (ADA)    │ ${:>16.4} │ {:>10.2} │",
-        ada_price,
-        ada_adx
-    );
+    println!("│ ₿ Bitcoin (BTC)    │ ${:>18.2} │ {:>10.2} │", btc_price, btc_adx);
+    println!("│ ₳ Cardano (ADA)    │ ${:>18.4} │ {:>10.2} │", ada_price, ada_adx);
     println!("└────────────────────┴────────────────────┴──────────────┘");
 
     println!("\nADX Interpretation:");
