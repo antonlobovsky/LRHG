@@ -1,7 +1,7 @@
 name: Hyperliquid Rust Bot
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/195 * * * *'
   workflow_dispatch:
 
 jobs:
