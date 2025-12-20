@@ -1,41 +1,36 @@
 use hyperliquid_rust_sdk::{BaseUrl, InfoClient};
-use ta::indicators::AverageDirectionalIndex;
+use ta::indicators::AverageTrueRange; // Standard name in 'ta' crate
 use ta::Next;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("--- 🟢 STARTING HYPERLIQUID BOT ---");
+    println!("--- 🟢 STARTING ATR VOLATILITY BOT ---");
 
-    // 1. Setup Client
     let info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await?;
 
-    // 2. Fetch BTC Candles
     let candles = info_client
         .candles_snapshot("BTC".to_string(), "15m".to_string(), 0, 0)
         .await?;
 
-    println!("✅ Market Data Synced. Processing {} candles...", candles.len());
+    // Initialize ATR with 14 periods
+    let mut atr = AverageTrueRange::new(14).unwrap();
+    let mut current_atr = 0.0;
 
-    // 3. Initialize ADX (14-period)
-    let mut adx = AverageDirectionalIndex::new(14).unwrap();
-    let mut current_adx = 0.0;
-
-    // 4. Feed data into indicator (Fixed field names)
     for candle in candles.iter() {
         let h: f64 = candle.high.parse().unwrap_or(0.0);
         let l: f64 = candle.low.parse().unwrap_or(0.0);
         let c: f64 = candle.close.parse().unwrap_or(0.0);
         
-        current_adx = adx.next((h, l, c));
+        current_atr = atr.next((h, l, c));
     }
 
-    println!("📊 Current BTC 15m ADX: {:.2}", current_adx);
+    println!("📊 Current BTC 15m ATR: {:.2}", current_atr);
 
-    // 5. Strategy Check
-    if current_adx > 25.0 {
-        println!("🔥 TREND DETECTED: Market is moving.");
+    // ATR Expansion Logic: Is the market "expanding"?
+    if current_atr > 50.0 { 
+        println!("🚀 VOLATILITY EXPANDING: Market is highly active.");
     } else {
-        println!("😴 NO TREND: ADX below 25.");
+        println!("😴 VOLATILITY LOW: Market is compressing.");
     }
 
     Ok(())
