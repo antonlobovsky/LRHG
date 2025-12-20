@@ -1,170 +1,126 @@
-use serde::Deserialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use reqwest::Client;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Deserialize)]
-struct PriceData {
-    #[serde(flatten)]
-    prices: HashMap<String, HashMap<String, f64>>,
+// Hyperliquid public endpoints
+const INFO_URL: &str = "https://api.hyperliquid.xyz/info";
+const WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
+
+#[derive(Serialize)]
+struct CandleRequest {
+    #[serde(rename = "type")]
+    msg_type: String,
+    req: CandleReq,
 }
 
-// Correct OHLC structure: timestamp is i64/u64, others f64
+#[derive(Serialize)]
+struct CandleReq {
+    coin: String,
+    interval: String,
+    startTime: u64,
+    endTime: u64,
+}
+
 #[derive(Deserialize, Debug)]
-struct OhlcCandle {
-    time: u64,   // We ignore this, but need to parse it
-    open: f64,
-    high: f64,
-    low: f64,
-    close: f64,
+struct Candle {
+    #[serde(rename = "t")]
+    timestamp: u64,
+    #[serde(rename = "o")]
+    open: String,
+    #[serde(rename = "h")]
+    high: String,
+    #[serde(rename = "l")]
+    low: String,
+    #[serde(rename = "c")]
+    close: String,
+    #[serde(rename = "v")]
+    volume: String,
 }
 
-fn calculate_adx(highs: &[f64], lows: &[f64], closes: &[f64], period: usize) -> Option<f64> {
-    if highs.len() < period + 1 {
-        return None;
-    }
+fn parse_price(s: &str) -> f64 {
+    s.parse::<f64>().unwrap_or(0.0)
+}
 
-    let mut tr = Vec::new();
-    let mut plus_dm = Vec::new();
-    let mut minus_dm = Vec::new();
+async fn fetch_candles_rest(coin: &str, interval: &str, num_candles: usize) -> Vec<Candle> {
+    let client = Client::new();
 
-    for i in 1..highs.len() {
-        let high_diff = highs[i] - highs[i - 1];
-        let low_diff = lows[i - 1] - lows[i];
+    let end_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
 
-        let tr_val = f64::max(
-            highs[i] - lows[i],
-            f64::max(
-                (highs[i] - closes[i - 1]).abs(),
-                (lows[i] - closes[i - 1]).abs(),
-            ),
-        );
-        tr.push(tr_val);
+    let interval_minutes: u64 = match interval {
+        "1m" => 1,
+        "5m" => 5,
+        "15m" => 15,
+        "1h" => 60,
+        "4h" => 240,
+        "1d" => 1440,
+        _ => 5,
+    };
 
-        let plus = if high_diff > low_diff && high_diff > 0.0 {
-            high_diff
-        } else {
-            0.0
-        };
-        let minus = if low_diff > high_diff && low_diff > 0.0 {
-            low_diff
-        } else {
-            0.0
-        };
+    let start_time = end_time.saturating_sub(num_candles as u64 * interval_minutes * 60 * 1000);
 
-        plus_dm.push(plus);
-        minus_dm.push(minus);
-    }
+    let payload = CandleRequest {
+        msg_type: "candleSnapshot".to_string(),
+        req: CandleReq {
+            coin: coin.to_string(),
+            interval: interval.to_string(),
+            startTime: start_time,
+            endTime: end_time,
+        },
+    };
 
-    let len = tr.len();
-    let mut atr = vec![0.0; len];
-    let mut plus_di = vec![0.0; len];
-    let mut minus_di = vec![0.0; len];
+    let response = client
+        .post(INFO_URL)
+        .json(&payload)
+        .send()
+        .await
+        .ok()
+        .and_then(|r| r.json::<Vec<Candle>>().ok());
 
-    atr[period - 2] = tr[..period].iter().sum::<f64>() / period as f64;
-    plus_di[period - 2] = 100.0
-        * (plus_dm[..period].iter().sum::<f64>() / period as f64)
-        / (atr[period - 2] + 1e-10);
-    minus_di[period - 2] = 100.0
-        * (minus_dm[..period].iter().sum::<f64>() / period as f64)
-        / (atr[period - 2] + 1e-10);
-
-    for i in period..len {
-        atr[i - 1] = (atr[i - 2] * (period as f64 - 1.0) + tr[i]) / period as f64;
-        plus_di[i - 1] = 100.0
-            * (((plus_di[i - 2] / 100.0) * (period as f64 - 1.0) + plus_dm[i]) / period as f64)
-            / (atr[i - 1] + 1e-10);
-        minus_di[i - 1] = 100.0
-            * (((minus_di[i - 2] / 100.0) * (period as f64 - 1.0) + minus_dm[i]) / period as f64)
-            / (atr[i - 1] + 1e-10);
-    }
-
-    let mut dx = vec![0.0; len - period + 1];
-    for i in 0..dx.len() {
-        let sum_di = plus_di[i + period - 2] + minus_di[i + period - 2];
-        dx[i] = 100.0
-            * (plus_di[i + period - 2] - minus_di[i + period - 2]).abs()
-            / (sum_di + 1e-10);
-    }
-
-    let mut adx = vec![0.0; dx.len()];
-    adx[period - 2] = dx[..period].iter().sum::<f64>() / period as f64;
-    for i in period..dx.len() {
-        adx[i - 1] = (adx[i - 2] * (period as f64 - 1.0) + dx[i]) / period as f64;
-    }
-
-    adx.last().copied()
+    response.unwrap_or_default()
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = reqwest::Client::new();
+async fn main() {
+    println!("Fetching latest 100 x 5m candles for BTC from Hyperliquid...\n");
 
-    // Current prices
-    let price_url = "https://api.coingecko.com/api/v3/simple/price";
-    let params = [("ids", "bitcoin,cardano"), ("vs_currencies", "usd")];
-    let price_resp = client
-        .get(price_url)
-        .query(&params)
-        .send()
-        .await?
-        .json::<PriceData>()
-        .await?;
+    let candles = fetch_candles_rest("BTC", "5m", 100).await;
 
-    let btc_price = *price_resp
-        .prices
-        .get("bitcoin")
-        .and_then(|m| m.get("usd"))
-        .unwrap_or(&0.0);
-    let ada_price = *price_resp
-        .prices
-        .get("cardano")
-        .and_then(|m| m.get("usd"))
-        .unwrap_or(&0.0);
-
-    // Historical OHLC for ADX (daily over last ~90 days)
-    let mut btc_highs = Vec::new();
-    let mut btc_lows = Vec::new();
-    let mut btc_closes = Vec::new();
-
-    let mut ada_highs = Vec::new();
-    let mut ada_lows = Vec::new();
-    let mut ada_closes = Vec::new();
-
-    let base_url = "https://api.coingecko.com/api/v3/coins/{}/ohlc?vs_currency=usd&days=90";
-
-    for (id, highs, lows, closes) in [
-        ("bitcoin", &mut btc_highs, &mut btc_lows, &mut btc_closes),
-        ("cardano", &mut ada_highs, &mut ada_lows, &mut ada_closes),
-    ] {
-        let ohlc_url = base_url.replace("{}", id);
-        let ohlc_resp: Vec<OhlcCandle> = client
-            .get(&ohlc_url)
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        for candle in ohlc_resp {
-            highs.push(candle.high);
-            lows.push(candle.low);
-            closes.push(candle.close);
-        }
+    if candles.is_empty() {
+        println!("Failed to fetch candles");
+        return;
     }
 
-    let btc_adx = calculate_adx(&btc_highs, &btc_lows, &btc_closes, 14).unwrap_or(0.0);
-    let ada_adx = calculate_adx(&ada_highs, &ada_lows, &ada_closes, 14).unwrap_or(0.0);
+    println!("Got {} candles (enough for ADX-14 and more)", candles.len());
+    println!("┌────────────────────┬──────────┬──────────┬──────────┬──────────┐");
+    println!("│ Time (UTC)         │ Open     │ High     │ Low      │ Close    │");
+    println!("├────────────────────┼──────────┼──────────┼──────────┼──────────┤");
 
-    // Pretty table
-    println!("┌────────────────────┬────────────────────┬──────────────┐");
-    println!("│ Cryptocurrency     │ Price (USD)        │ ADX (14)     │");
-    println!("├────────────────────┼────────────────────┼──────────────┤");
-    println!("│ ₿ Bitcoin (BTC)    │ ${:>18.2} │ {:>10.2} │", btc_price, btc_adx);
-    println!("│ ₳ Cardano (ADA)    │ ${:>18.4} │ {:>10.2} │", ada_price, ada_adx);
-    println!("└────────────────────┴────────────────────┴──────────────┘");
+    // Show last 10 candles (most recent)
+    for candle in candles.iter().rev().take(10) {
+        let time = chrono::NaiveDateTime::from_timestamp_opt((candle.timestamp / 1000) as i64, 0)
+            .unwrap_or_default()
+            .format("%Y-%m-%d %H:%M");
 
-    println!("\nADX Interpretation:");
-    println!("  < 20 → Weak trend (ranging)");
-    println!("  20–25 → Developing trend");
-    println!("  > 25 → Strong trend");
+        println!(
+            "│ {} │ {:>8.2} │ {:>8.2} │ {:>8.2} │ {:>8.2} │",
+            time,
+            parse_price(&candle.open),
+            parse_price(&candle.high),
+            parse_price(&candle.low),
+            parse_price(&candle.close)
+        );
+    }
 
-    Ok(())
+    println!("└────────────────────┴──────────┴──────────┴──────────┴──────────┘");
+
+    // Now you have candles → ready for ADX calculation!
+    let highs: Vec<f64> = candles.iter().map(|c| parse_price(&c.high)).collect();
+    let lows: Vec<f64> = candles.iter().map(|c| parse_price(&c.low)).collect();
+    let closes: Vec<f64> = candles.iter().map(|c| parse_price(&c.close)).collect();
+
+    println!("\nYou now have vectors for highs/lows/closes — plug into your ADX function!");
+    println!("Example: highs.len() = {}", highs.len());
 }
